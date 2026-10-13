@@ -1,0 +1,6 @@
+{
+  "name": "EuroStruct 1090 - Eurocode & Safe Lifting Suite",
+  "description": "Eurocode structural beam calculations, safe lifting & pad-eye rigging verifications, execution class determination, and EN 1090 CE/UKCA compliance documentation assistant.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

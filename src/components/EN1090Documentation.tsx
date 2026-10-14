@@ -858,7 +858,11 @@ FPC Certificate: ${metadata.fpcCertificateNumber} (Notified Body: ${metadata.not
 
             <div className="space-y-3 text-xs">
               <span className="font-bold text-slate-900 uppercase tracking-wider block">
-                Rigging Hardware Specifications & Checks
+                Rigging Hardware Specifications & Verifications ({
+                  liftingInputs.riggingMethod === 'crane_slings_only' ? 'Direct Slings Wrapped Around Beam' :
+                  liftingInputs.riggingMethod === 'forklift_slung' ? 'Forklift Truck Handling & Stability' :
+                  'Welded Lifting Pad-Eyes & Bow Shackles'
+                })
               </span>
               <table className="w-full text-xs border border-slate-300 divide-y divide-slate-200">
                 <thead className="bg-slate-100 text-slate-800 font-bold">
@@ -870,36 +874,112 @@ FPC Certificate: ${metadata.fpcCertificateNumber} (Notified Body: ${metadata.not
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200 text-slate-700 font-mono">
-                  <tr>
-                    <td className="px-3 py-2 border-r border-slate-300 font-sans font-semibold">Sling Leg Bridle</td>
-                    <td className="px-3 py-2 border-r border-slate-300">{liftingInputs.slingConfiguration} at {liftingInputs.slingAngleToVerticalDeg}° to vertical</td>
-                    <td className="px-3 py-2 border-r border-slate-300">Tension = {liftingResults.slingTensionPerLegTonnes}t / leg</td>
-                    <td className="px-3 py-2 font-bold text-emerald-700">WLL &ge; {liftingResults.recommendedMinimumSlingWllTonnes}t</td>
-                  </tr>
-                  <tr>
-                    <td className="px-3 py-2 border-r border-slate-300 font-sans font-semibold">Certified Bow Shackle</td>
-                    <td className="px-3 py-2 border-r border-slate-300">WLL {selectedShackle.wllTonnes}t (Pin ⌀{selectedShackle.pinDiameterMm}mm)</td>
-                    <td className="px-3 py-2 border-r border-slate-300">Clearance = {liftingInputs.lugHoleDiameterMm - selectedShackle.pinDiameterMm}mm</td>
-                    <td className="px-3 py-2 font-bold text-emerald-700">PASS</td>
-                  </tr>
-                  <tr>
-                    <td className="px-3 py-2 border-r border-slate-300 font-sans font-semibold">Pad-Eye Pin Bearing</td>
-                    <td className="px-3 py-2 border-r border-slate-300">Plate t={liftingInputs.lugThicknessMm}mm, Grade {liftingInputs.padEyeSteelGrade}</td>
-                    <td className="px-3 py-2 border-r border-slate-300">σ_b = {liftingResults.pinBearingStressMpa} MPa &le; {liftingResults.allowablePinBearingStressMpa} MPa</td>
-                    <td className="px-3 py-2 font-bold text-emerald-700">{liftingResults.isBearingPass ? 'PASS' : 'FAIL'}</td>
-                  </tr>
-                  <tr>
-                    <td className="px-3 py-2 border-r border-slate-300 font-sans font-semibold">Pad-Eye Tear-Out</td>
-                    <td className="px-3 py-2 border-r border-slate-300">Outer R={liftingInputs.lugHoleRadiusMm}mm (dh={liftingInputs.lugHoleDiameterMm}mm)</td>
-                    <td className="px-3 py-2 border-r border-slate-300">Capacity = {liftingResults.tearOutResistanceKn} kN</td>
-                    <td className="px-3 py-2 font-bold text-emerald-700">{liftingResults.isTearOutPass ? 'PASS' : 'FAIL'}</td>
-                  </tr>
-                  <tr>
-                    <td className="px-3 py-2 border-r border-slate-300 font-sans font-semibold">Base Fillet Weld</td>
-                    <td className="px-3 py-2 border-r border-slate-300">Throat a={liftingInputs.lugWeldThroatMm}mm, Length Lw={liftingInputs.lugWeldLengthMm}mm</td>
-                    <td className="px-3 py-2 border-r border-slate-300">σ_weld = {liftingResults.weldStressMpa} MPa (with 5% lateral)</td>
-                    <td className="px-3 py-2 font-bold text-emerald-700">{liftingResults.isWeldPass ? 'PASS' : 'FAIL'}</td>
-                  </tr>
+                  {liftingInputs.riggingMethod === 'crane_slings_only' ? (
+                    <>
+                      <tr>
+                        <td className="px-3 py-2 border-r border-slate-300 font-sans font-semibold">Sling Rigging Geometry</td>
+                        <td className="px-3 py-2 border-r border-slate-300">Length L={liftingInputs.slingLengthMeters}m | Wrap Spacing S={liftingInputs.pickupPointsSpacingMeters}m</td>
+                        <td className="px-3 py-2 border-r border-slate-300">θ = {liftingResults.calculatedSlingAngleDeg}° | Hook Height H={liftingResults.calculatedHookHeightMeters}m</td>
+                        <td className="px-3 py-2 font-bold text-emerald-700">GEOMETRY OK</td>
+                      </tr>
+                      <tr>
+                        <td className="px-3 py-2 border-r border-slate-300 font-sans font-semibold">Sling Tension Per Leg</td>
+                        <td className="px-3 py-2 border-r border-slate-300">{liftingInputs.slingConfiguration} ({liftingInputs.slingMaterial.replace('_', ' ')})</td>
+                        <td className="px-3 py-2 border-r border-slate-300">T_leg = {liftingResults.slingTensionPerLegTonnes} tonnes ({liftingResults.slingTensionPerLegKn} kN)</td>
+                        <td className="px-3 py-2 font-bold text-slate-900">{liftingResults.slingTensionPerLegTonnes}t / leg</td>
+                      </tr>
+                      <tr>
+                        <td className="px-3 py-2 border-r border-slate-300 font-sans font-semibold">User Sling Rated WLL</td>
+                        <td className="px-3 py-2 border-r border-slate-300">Rated WLL {liftingInputs.userSlingWllTonnes}t ({liftingInputs.hitchType} hitch factor: {liftingResults.hitchDerationFactor})</td>
+                        <td className="px-3 py-2 border-r border-slate-300">Effective WLL = {liftingResults.effectiveSlingCapacityTonnes}t &ge; {liftingResults.slingTensionPerLegTonnes}t</td>
+                        <td className={`px-3 py-2 font-bold ${liftingResults.isSlingCapacityPass ? 'text-emerald-700' : 'text-rose-700'}`}>
+                          {liftingResults.isSlingCapacityPass ? `PASS (${(liftingResults.slingCapacityUtilization * 100).toFixed(1)}%)` : 'OVERLOAD'}
+                        </td>
+                      </tr>
+                      <tr>
+                        <td className="px-3 py-2 border-r border-slate-300 font-sans font-semibold">Beam Flange Corner Protection</td>
+                        <td className="px-3 py-2 border-r border-slate-300">{liftingInputs.edgeProtection === 'softeners_fitted' ? 'Corner Softeners / Protective Sleeves Fitted' : 'Bare Sharp Steel Flange'}</td>
+                        <td className="px-3 py-2 border-r border-slate-300">EN 1492 / EN 13414 corner radius cut prevention</td>
+                        <td className={`px-3 py-2 font-bold ${liftingInputs.edgeProtection === 'softeners_fitted' ? 'text-emerald-700' : 'text-amber-700'}`}>
+                          {liftingInputs.edgeProtection === 'softeners_fitted' ? 'COMPLIANT' : 'SOFTENERS REQ.'}
+                        </td>
+                      </tr>
+                    </>
+                  ) : liftingInputs.riggingMethod === 'forklift_slung' ? (
+                    <>
+                      <tr>
+                        <td className="px-3 py-2 border-r border-slate-300 font-sans font-semibold">Forklift Rated Capacity</td>
+                        <td className="px-3 py-2 border-r border-slate-300">{liftingInputs.forkliftRatedCapacityTonnes}t @ {liftingInputs.forkliftStandardLoadCenterMm}mm center</td>
+                        <td className="px-3 py-2 border-r border-slate-300">Standard nameplate rating</td>
+                        <td className="px-3 py-2 font-bold text-slate-900">{liftingInputs.forkliftRatedCapacityTonnes}t WLL</td>
+                      </tr>
+                      <tr>
+                        <td className="px-3 py-2 border-r border-slate-300 font-sans font-semibold">Actual Load Center Deration</td>
+                        <td className="px-3 py-2 border-r border-slate-300">Pickup Location: {liftingInputs.actualLoadCenterMm}mm from fork heel</td>
+                        <td className="px-3 py-2 border-r border-slate-300">Derated Capacity = {liftingResults.forkliftDeratedCapacityTonnes}t (ISO 22915)</td>
+                        <td className="px-3 py-2 font-bold text-emerald-700">DERATED OK</td>
+                      </tr>
+                      <tr>
+                        <td className="px-3 py-2 border-r border-slate-300 font-sans font-semibold">Forklift Stability & Load Check</td>
+                        <td className="px-3 py-2 border-r border-slate-300">Applied Dynamic Load: {liftingResults.forkliftAppliedTotalTonnes}t ({liftingResults.factoredDynamicLiftLoadKn} kN)</td>
+                        <td className="px-3 py-2 border-r border-slate-300">Utilization = {(liftingResults.forkliftUtilization * 100).toFixed(1)}% &le; 100%</td>
+                        <td className={`px-3 py-2 font-bold ${liftingResults.isForkliftPass ? 'text-emerald-700' : 'text-rose-700'}`}>
+                          {liftingResults.isForkliftPass ? 'SAFE PASS' : 'OVERLOAD'}
+                        </td>
+                      </tr>
+                    </>
+                  ) : (
+                    <>
+                      <tr>
+                        <td className="px-3 py-2 border-r border-slate-300 font-sans font-semibold">Sling Leg Bridle</td>
+                        <td className="px-3 py-2 border-r border-slate-300">{liftingInputs.slingConfiguration} at {liftingInputs.slingAngleToVerticalDeg}° to vertical</td>
+                        <td className="px-3 py-2 border-r border-slate-300">Tension = {liftingResults.slingTensionPerLegTonnes}t / leg</td>
+                        <td className="px-3 py-2 font-bold text-emerald-700">WLL &ge; {liftingResults.recommendedMinimumSlingWllTonnes}t</td>
+                      </tr>
+                      <tr>
+                        <td className="px-3 py-2 border-r border-slate-300 font-sans font-semibold">Certified Bow Shackle</td>
+                        <td className="px-3 py-2 border-r border-slate-300">WLL {selectedShackle.wllTonnes}t (Pin ⌀{selectedShackle.pinDiameterMm}mm)</td>
+                        <td className="px-3 py-2 border-r border-slate-300">Clearance = {liftingInputs.lugHoleDiameterMm - selectedShackle.pinDiameterMm}mm</td>
+                        <td className="px-3 py-2 font-bold text-emerald-700">PASS</td>
+                      </tr>
+                      <tr>
+                        <td className="px-3 py-2 border-r border-slate-300 font-sans font-semibold">Pad-Eye Pin Bearing</td>
+                        <td className="px-3 py-2 border-r border-slate-300">Plate t={liftingInputs.lugThicknessMm}mm, Grade {liftingInputs.padEyeSteelGrade}</td>
+                        <td className="px-3 py-2 border-r border-slate-300">σ_b = {liftingResults.pinBearingStressMpa} MPa &le; {liftingResults.allowablePinBearingStressMpa} MPa</td>
+                        <td className="px-3 py-2 font-bold text-emerald-700">{liftingResults.isBearingPass ? 'PASS' : 'FAIL'}</td>
+                      </tr>
+                      <tr>
+                        <td className="px-3 py-2 border-r border-slate-300 font-sans font-semibold">Pad-Eye Tear-Out</td>
+                        <td className="px-3 py-2 border-r border-slate-300">Outer R={liftingInputs.lugHoleRadiusMm}mm (dh={liftingInputs.lugHoleDiameterMm}mm)</td>
+                        <td className="px-3 py-2 border-r border-slate-300">Capacity = {liftingResults.tearOutResistanceKn} kN</td>
+                        <td className="px-3 py-2 font-bold text-emerald-700">{liftingResults.isTearOutPass ? 'PASS' : 'FAIL'}</td>
+                      </tr>
+                      <tr>
+                        <td className="px-3 py-2 border-r border-slate-300 font-sans font-semibold">Pad-Eye Fillet Weld (EC3)</td>
+                        <td className="px-3 py-2 border-r border-slate-300">
+                          Double Fillet: a={liftingInputs.lugWeldThroatMm}mm, Lw={liftingInputs.lugWeldLengthMm}mm (Aw={liftingResults.detailedWeldCheck?.totalThroatAreaMm2}mm²)
+                        </td>
+                        <td className="px-3 py-2 border-r border-slate-300">
+                          σ_vm = {liftingResults.detailedWeldCheck?.vonMisesStressMpa} MPa &le; {liftingResults.detailedWeldCheck?.designWeldStrengthFwRdMpa} MPa | τ_res = {liftingResults.detailedWeldCheck?.simplifiedResultantStressMpa} MPa
+                        </td>
+                        <td className={`px-3 py-2 font-bold ${liftingResults.detailedWeldCheck?.isWeldPass ? 'text-emerald-700' : 'text-rose-700'}`}>
+                          {liftingResults.detailedWeldCheck?.isWeldPass ? `PASS (${((liftingResults.detailedWeldCheck?.governingUtilization ?? 0) * 100).toFixed(1)}%)` : 'OVERSTRESSED'}
+                        </td>
+                      </tr>
+                      <tr>
+                        <td className="px-3 py-2 border-r border-slate-300 font-sans font-semibold">Shear / Tension Interaction</td>
+                        <td className="px-3 py-2 border-r border-slate-300">
+                          σ_ten={liftingResults.detailedWeldCheck?.totalTensionStressMpa} MPa, τ_shear={liftingResults.detailedWeldCheck?.resultantShearStressMpa} MPa (5% lateral)
+                        </td>
+                        <td className="px-3 py-2 border-r border-slate-300">
+                          (σ/f_ten)² + (τ/f_vwd)² = {liftingResults.detailedWeldCheck?.interactionIndex} &le; 1.00 (EN 1993-1-8 Cl. 4.5.3)
+                        </td>
+                        <td className={`px-3 py-2 font-bold ${liftingResults.detailedWeldCheck?.isWeldPass ? 'text-emerald-700' : 'text-rose-700'}`}>
+                          {liftingResults.detailedWeldCheck?.isWeldPass ? 'COMPLIANT' : 'NON-COMPLIANT'}
+                        </td>
+                      </tr>
+                    </>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -909,7 +989,7 @@ FPC Certificate: ${metadata.fpcCertificateNumber} (Notified Body: ${metadata.not
               <ul className="list-disc pl-4 space-y-0.5 text-[11px]">
                 <li>All lifting accessories (shackles, slings) must possess valid 6-monthly Thorough Examination reports.</li>
                 <li>Tag lines must be attached to prevent uncontrolled rotation during transit.</li>
-                <li>Sling angle from vertical must not exceed {inputsSlingAngleDeg(liftingInputs.slingAngleToVerticalDeg)} under any hoisting condition.</li>
+                <li>Sling angle from vertical must not exceed 60° (calculated: {liftingResults.calculatedSlingAngleDeg}°) under any hoisting condition.</li>
               </ul>
             </div>
 

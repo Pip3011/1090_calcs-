@@ -168,56 +168,167 @@ export function validateLiftingInputs(inputs: LiftingInputs): ValidationError[] 
     });
   }
 
-  // Pad-eye geometry vs Shackle
-  if (inputs.lugHoleDiameterMm <= 0) {
-    errors.push({
-      field: 'lugHoleDiameterMm',
-      message: 'Lug hole diameter must be greater than 0 mm.',
-      severity: 'error'
-    });
-  }
+  // Mode-specific validation checks
+  if (inputs.riggingMethod === 'crane_slings_only') {
+    // Sling WLL check
+    if (!inputs.userSlingWllTonnes || inputs.userSlingWllTonnes <= 0) {
+      errors.push({
+        field: 'userSlingWllTonnes',
+        message: 'Specified sling working load limit (WLL) must be greater than 0 tonnes.',
+        severity: 'error',
+        standardClause: 'EN 1492 / EN 13414'
+      });
+    }
 
-  if (inputs.lugThicknessMm < 6) {
-    errors.push({
-      field: 'lugThicknessMm',
-      message: 'Minimum recommended lifting lug thickness is 6mm to prevent out-of-plane buckling.',
-      severity: 'warning',
-      standardClause: 'EN 1993-1-8 Cl. 3.13'
-    });
-  }
+    // Sling length check
+    if (!inputs.slingLengthMeters || inputs.slingLengthMeters <= 0) {
+      errors.push({
+        field: 'slingLengthMeters',
+        message: 'Sling leg length must be greater than 0 meters.',
+        severity: 'error'
+      });
+    }
 
-  // Edge distance
-  if (inputs.lugHoleRadiusMm < inputs.lugHoleDiameterMm * 1.0) {
-    errors.push({
-      field: 'lugHoleRadiusMm',
-      message: 'CRITICAL: Pad-eye outer radius R must be at least 1.25x hole diameter to prevent shear tear-out.',
-      severity: 'error',
-      standardClause: 'EN 1993-1-8 Table 3.9'
-    });
-  } else if (inputs.lugHoleRadiusMm < inputs.lugHoleDiameterMm * 1.25) {
-    errors.push({
-      field: 'lugHoleRadiusMm',
-      message: 'Recommended edge distance R >= 1.50 * dh for ductile failure mode.',
-      severity: 'warning',
-      standardClause: 'EN 1993-1-8'
-    });
-  }
+    // Pickup spacing check
+    if (!inputs.pickupPointsSpacingMeters || inputs.pickupPointsSpacingMeters <= 0) {
+      errors.push({
+        field: 'pickupPointsSpacingMeters',
+        message: 'Pickup points wrap spacing must be greater than 0 meters.',
+        severity: 'error'
+      });
+    }
 
-  // Weld throat
-  if (inputs.lugWeldThroatMm < 3) {
-    errors.push({
-      field: 'lugWeldThroatMm',
-      message: 'Minimum structural fillet weld throat thickness is 3.0mm.',
-      severity: 'error',
-      standardClause: 'EN 1993-1-8 Cl. 4.5.2'
-    });
-  } else if (inputs.lugWeldThroatMm > inputs.lugThicknessMm) {
-    errors.push({
-      field: 'lugWeldThroatMm',
-      message: 'Fillet weld throat (a) typically should not exceed parent plate thickness.',
-      severity: 'warning',
-      standardClause: 'EN 1993-1-8 Cl. 4.5.1'
-    });
+    // Geometry check: sling length vs half spacing
+    if (inputs.useLengthToDeriveAngle && inputs.slingLengthMeters > 0 && inputs.pickupPointsSpacingMeters > 0) {
+      const halfSpacing = inputs.pickupPointsSpacingMeters / 2;
+      if (inputs.slingLengthMeters <= halfSpacing) {
+        errors.push({
+          field: 'slingLengthMeters',
+          message: `Sling length (${inputs.slingLengthMeters}m) is too short to reach pickup spacing (${inputs.pickupPointsSpacingMeters}m). Leg length must exceed ${halfSpacing.toFixed(2)}m.`,
+          severity: 'error',
+          standardClause: 'Rigging Geometry'
+        });
+      }
+    }
+
+    // Edge protection check
+    if (inputs.edgeProtection === 'bare_steel_edges') {
+      errors.push({
+        field: 'edgeProtection',
+        message: 'EN 1492 / EN 13414: Flange edge protectors or wear sleeves are mandatory when slinging bare steel beams to prevent sling shearing.',
+        severity: 'warning',
+        standardClause: 'EN 1492-1 Annex B'
+      });
+    }
+  } else if (inputs.riggingMethod === 'forklift_slung') {
+    if (!inputs.forkliftRatedCapacityTonnes || inputs.forkliftRatedCapacityTonnes <= 0) {
+      errors.push({
+        field: 'forkliftRatedCapacityTonnes',
+        message: 'Forklift rated capacity must be greater than 0 tonnes.',
+        severity: 'error'
+      });
+    }
+
+    if (!inputs.actualLoadCenterMm || inputs.actualLoadCenterMm <= 0) {
+      errors.push({
+        field: 'actualLoadCenterMm',
+        message: 'Actual load center distance from fork heel must be greater than 0 mm.',
+        severity: 'error'
+      });
+    } else if (inputs.actualLoadCenterMm > inputs.forkliftStandardLoadCenterMm * 2.0) {
+      errors.push({
+        field: 'actualLoadCenterMm',
+        message: 'Extended load center (> 2x rated) causes severe deration and rollover danger per ISO 22915.',
+        severity: 'warning',
+        standardClause: 'ISO 22915 Stability'
+      });
+    }
+  } else {
+    // crane_padeyes mode: Pad-eye geometry vs Shackle
+    if (inputs.lugHoleDiameterMm <= 0) {
+      errors.push({
+        field: 'lugHoleDiameterMm',
+        message: 'Lug hole diameter must be greater than 0 mm.',
+        severity: 'error'
+      });
+    }
+
+    if (inputs.lugThicknessMm < 6) {
+      errors.push({
+        field: 'lugThicknessMm',
+        message: 'Minimum recommended lifting lug thickness is 6mm to prevent out-of-plane buckling.',
+        severity: 'warning',
+        standardClause: 'EN 1993-1-8 Cl. 3.13'
+      });
+    }
+
+    // Edge distance
+    if (inputs.lugHoleRadiusMm < inputs.lugHoleDiameterMm * 1.0) {
+      errors.push({
+        field: 'lugHoleRadiusMm',
+        message: 'CRITICAL: Pad-eye outer radius R must be at least 1.25x hole diameter to prevent shear tear-out.',
+        severity: 'error',
+        standardClause: 'EN 1993-1-8 Table 3.9'
+      });
+    } else if (inputs.lugHoleRadiusMm < inputs.lugHoleDiameterMm * 1.25) {
+      errors.push({
+        field: 'lugHoleRadiusMm',
+        message: 'Recommended edge distance R >= 1.50 * dh for ductile failure mode.',
+        severity: 'warning',
+        standardClause: 'EN 1993-1-8'
+      });
+    }
+
+    // Weld throat
+    if (inputs.lugWeldThroatMm < 3) {
+      errors.push({
+        field: 'lugWeldThroatMm',
+        message: 'Minimum structural fillet weld throat thickness is 3.0mm.',
+        severity: 'error',
+        standardClause: 'EN 1993-1-8 Cl. 4.5.2'
+      });
+    } else if (inputs.lugWeldThroatMm > inputs.lugThicknessMm) {
+      errors.push({
+        field: 'lugWeldThroatMm',
+        message: 'Fillet weld throat (a) typically should not exceed parent plate thickness.',
+        severity: 'warning',
+        standardClause: 'EN 1993-1-8 Cl. 4.5.1'
+      });
+    }
+
+    // Weld length
+    if (!inputs.lugWeldLengthMm || inputs.lugWeldLengthMm <= 0) {
+      errors.push({
+        field: 'lugWeldLengthMm',
+        message: 'Weld length (Lw) must be greater than 0 mm.',
+        severity: 'error',
+        standardClause: 'EN 1993-1-8 Cl. 4.5.1'
+      });
+    } else if (inputs.lugWeldLengthMm < Math.max(30, 6 * inputs.lugWeldThroatMm)) {
+      errors.push({
+        field: 'lugWeldLengthMm',
+        message: `Weld length Lw (${inputs.lugWeldLengthMm}mm) should be at least max(30mm, 6×a = ${(6 * inputs.lugWeldThroatMm).toFixed(0)}mm) to develop effective throat resistance per EN 1993-1-8 Cl. 4.5.1.`,
+        severity: 'warning',
+        standardClause: 'EN 1993-1-8 Cl. 4.5.1'
+      });
+    }
+
+    // Lug height from base
+    if (!inputs.lugHeightFromBaseMm || inputs.lugHeightFromBaseMm <= 0) {
+      errors.push({
+        field: 'lugHeightFromBaseMm',
+        message: 'Lug pin height from weld base must be greater than 0 mm.',
+        severity: 'error',
+        standardClause: 'EN 1993-1-8'
+      });
+    } else if (inputs.lugHeightFromBaseMm < inputs.lugHoleRadiusMm + 15) {
+      errors.push({
+        field: 'lugHeightFromBaseMm',
+        message: `Lug height (${inputs.lugHeightFromBaseMm}mm) provides tight clearance below hole radius (${inputs.lugHoleRadiusMm}mm). Verify bow shackle body clearance above weld bead.`,
+        severity: 'warning',
+        standardClause: 'Rigging Clearance'
+      });
+    }
   }
 
   return errors;

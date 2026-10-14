@@ -7,7 +7,9 @@ import {
   Anchor,
   BookOpen,
   ShieldCheck,
-  Download
+  Download,
+  Box,
+  Laptop
 } from 'lucide-react';
 import {
   ProjectMetadata,
@@ -27,10 +29,11 @@ import { LiftingCalculator } from './components/LiftingCalculator';
 import { EN1090Documentation } from './components/EN1090Documentation';
 import { EurocodeLibraryViewer } from './components/EurocodeLibraryViewer';
 import { DownloadAppModal } from './components/DownloadAppModal';
+import { SolidWorksIntegration } from './components/SolidWorksIntegration';
 import { useOnlineStatus } from './hooks/usePWAInstall';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'walkthrough' | 'structural' | 'lifting' | 'compliance' | 'library'>('walkthrough');
+  const [activeTab, setActiveTab] = useState<'walkthrough' | 'structural' | 'lifting' | 'compliance' | 'solidworks' | 'library'>('walkthrough');
   const [isDownloadModalOpen, setIsDownloadModalOpen] = useState(false);
   const isOnline = useOnlineStatus();
 
@@ -98,10 +101,19 @@ export default function App() {
     includeSelfWeight: true,
     deflectionLimitRatio: 360,
     lateralRestraint: 'continuous',
+    partialSafetyFactors: {
+      gammaM0: 1.00,
+      gammaM1: 1.00,
+      gammaM2: 1.25,
+      isCustomOverride: false,
+      preset: 'eurocode_standard',
+      customRationale: 'Standard Eurocode 3 recommended values per EN 1993-1-1 Cl. 6.1.',
+    },
   });
 
   // Lifting Calculation Inputs
   const [liftingInputs, setLiftingInputs] = useState<LiftingInputs>({
+    riggingMethod: 'crane_slings_only',
     tareWeightKg: 2400,
     riggingAccessoryWeightKg: 120,
     dynamicAmplificationFactor: 1.20,
@@ -109,7 +121,19 @@ export default function App() {
     consequenceFactor: 1.30,
     slingConfiguration: '2-leg',
     slingAngleToVerticalDeg: 30,
-    slingMaterial: 'grade_80_chain',
+    slingMaterial: 'polyester_webbing',
+    userSlingWllTonnes: 5.0,
+    slingLengthMeters: 3.0,
+    pickupPointsSpacingMeters: 3.5,
+    hitchType: 'choker',
+    useLengthToDeriveAngle: true,
+    edgeProtection: 'softeners_fitted',
+    forkliftRatedCapacityTonnes: 5.0,
+    forkliftStandardLoadCenterMm: 500,
+    actualLoadCenterMm: 750,
+    forkliftAttachment: 'tines_slung',
+    pickupLocationFromCoGMm: 0,
+    fltGroundCondition: 'smooth_concrete',
     padEyeQuantity: 2,
     padEyeSteelGrade: 'S355',
     lugThicknessMm: 20,
@@ -135,7 +159,10 @@ export default function App() {
 
   // Real-time calculations
   const structuralResults = calculateStructuralBeam(structuralInputs, customSections);
-  const liftingResults = calculateSafeLifting(liftingInputs);
+  const liftingResults = calculateSafeLifting(liftingInputs, {
+    gammaM0: structuralInputs.partialSafetyFactors?.gammaM0,
+    gammaM2: structuralInputs.partialSafetyFactors?.gammaM2
+  });
 
   // Quick Preset Handler
   const handleApplyPreset = (presetKey: 'mezzanine' | 'crane_girder' | 'canopy') => {
@@ -296,6 +323,16 @@ export default function App() {
           </button>
           <button
             type="button"
+            onClick={() => setActiveTab('solidworks')}
+            className={`whitespace-nowrap shrink-0 transition-colors inline-flex items-center gap-1.5 ${
+              activeTab === 'solidworks' ? 'text-rose-700 font-bold border-b-2 border-rose-600 pb-0.5' : 'hover:text-rose-700'
+            }`}
+          >
+            <Box className="w-3.5 h-3.5 text-rose-600" />
+            <span>SolidWorks CAD</span>
+          </button>
+          <button
+            type="button"
             onClick={() => setActiveTab('library')}
             className={`whitespace-nowrap shrink-0 transition-colors ${
               activeTab === 'library' ? 'text-indigo-950 font-bold border-b-2 border-indigo-900 pb-0.5' : 'hover:text-slate-900'
@@ -310,11 +347,11 @@ export default function App() {
           <button
             type="button"
             onClick={() => setIsDownloadModalOpen(true)}
-            className="px-3.5 py-2 text-xs font-bold text-slate-800 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg transition-colors whitespace-nowrap shrink-0 inline-flex items-center gap-1.5 shadow-xs"
-            title="Download App / Install on Desktop or Phone"
+            className="px-3.5 py-2 text-xs font-bold text-white bg-indigo-950 hover:bg-indigo-900 border border-indigo-800 rounded-lg transition-colors whitespace-nowrap shrink-0 inline-flex items-center gap-1.5 shadow-xs"
+            title="Open on Any PC · Install as Desktop Application"
           >
-            <Download className="w-3.5 h-3.5 text-indigo-700" />
-            <span>Download App</span>
+            <Laptop className="w-3.5 h-3.5 text-indigo-400" />
+            <span>Open on Any PC</span>
           </button>
           <button
             type="button"
@@ -370,6 +407,13 @@ export default function App() {
         </button>
         <button
           type="button"
+          onClick={() => setActiveTab('solidworks')}
+          className={`whitespace-nowrap py-1 ${activeTab === 'solidworks' ? 'text-rose-700 font-bold' : 'text-slate-600'}`}
+        >
+          SolidWorks
+        </button>
+        <button
+          type="button"
           onClick={() => setActiveTab('library')}
           className={`whitespace-nowrap py-1 ${activeTab === 'library' ? 'text-indigo-900 font-bold' : 'text-slate-600'}`}
         >
@@ -408,6 +452,7 @@ export default function App() {
             inputs={liftingInputs}
             setInputs={setLiftingInputs}
             results={liftingResults}
+            onOpenSolidWorks={() => setActiveTab('solidworks')}
           />
         )}
 
@@ -419,6 +464,18 @@ export default function App() {
             structuralResults={structuralResults}
             liftingInputs={liftingInputs}
             liftingResults={liftingResults}
+          />
+        )}
+
+        {activeTab === 'solidworks' && (
+          <SolidWorksIntegration
+            structuralInputs={structuralInputs}
+            liftingInputs={liftingInputs}
+            metadata={metadata}
+            structuralResults={structuralResults}
+            liftingResults={liftingResults}
+            customSections={customSections}
+            onNavigateToTab={(tab) => setActiveTab(tab)}
           />
         )}
 

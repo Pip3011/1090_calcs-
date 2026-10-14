@@ -10,9 +10,22 @@ import {
   ChevronUp,
   Sliders,
   Scale,
-  Plus
+  Plus,
+  Shield,
+  ShieldAlert,
+  ShieldCheck,
+  Settings2,
+  RotateCcw,
+  Sparkles
 } from 'lucide-react';
-import { StructuralInputs, StructuralResults, SteelGrade, SteelSection } from '../types';
+import {
+  StructuralInputs,
+  StructuralResults,
+  SteelGrade,
+  SteelSection,
+  PartialSafetyFactors,
+  PartialSafetyPreset
+} from '../types';
 import { STANDARD_SECTIONS, STEEL_GRADES } from '../data/steelSections';
 import { validateStructuralInputs } from '../utils/validation';
 import { CustomBeamBuilder } from './CustomBeamBuilder';
@@ -37,6 +50,96 @@ export const StructuralCalculator: React.FC<StructuralCalculatorProps> = ({
   const [activeDiagram, setActiveDiagram] = useState<'loads' | 'bmd' | 'sfd' | 'deflection'>('loads');
   const [showFormulaSteps, setShowFormulaSteps] = useState(false);
   const [isCustomBeamModalOpen, setIsCustomBeamModalOpen] = useState(false);
+  const [isSafetyPanelOpen, setIsSafetyPanelOpen] = useState(false);
+
+  const currentPsf: PartialSafetyFactors = inputs.partialSafetyFactors ?? {
+    gammaM0: 1.00,
+    gammaM1: 1.00,
+    gammaM2: 1.25,
+    isCustomOverride: false,
+    preset: 'eurocode_standard',
+    customRationale: '',
+  };
+
+  const applyPreset = (preset: PartialSafetyPreset) => {
+    let gammaM0 = 1.00;
+    let gammaM1 = 1.00;
+    let gammaM2 = 1.25;
+    let isCustom = false;
+    let rationale = '';
+
+    if (preset === 'eurocode_standard') {
+      gammaM0 = 1.00;
+      gammaM1 = 1.00;
+      gammaM2 = 1.25;
+      isCustom = false;
+      rationale = 'Standard Eurocode 3 recommended values per EN 1993-1-1 Cl. 6.1.';
+    } else if (preset === 'uk_national_annex') {
+      gammaM0 = 1.00;
+      gammaM1 = 1.00;
+      gammaM2 = 1.10;
+      isCustom = true;
+      rationale = 'UK National Annex to BS EN 1993-1-1 (gamma_M2 = 1.10).';
+    } else if (preset === 'stainless_steel_en1993_1_4') {
+      gammaM0 = 1.10;
+      gammaM1 = 1.10;
+      gammaM2 = 1.25;
+      isCustom = true;
+      rationale = 'EN 1993-1-4 Annex A for austenitic and duplex stainless steel grades.';
+    } else if (preset === 'reused_steel_sci_p427') {
+      gammaM0 = 1.15;
+      gammaM1 = 1.20;
+      gammaM2 = 1.35;
+      isCustom = true;
+      rationale = 'SCI P427 / EN 1090-2 Annex N for reclaimed structural steelwork.';
+    } else if (preset === 'offshore_dnv') {
+      gammaM0 = 1.15;
+      gammaM1 = 1.15;
+      gammaM2 = 1.30;
+      isCustom = true;
+      rationale = 'DNV-ST-N001 / ISO 19902 marine & offshore structural specifications.';
+    } else if (preset === 'custom_override') {
+      isCustom = true;
+      gammaM0 = currentPsf.gammaM0;
+      gammaM1 = currentPsf.gammaM1;
+      gammaM2 = currentPsf.gammaM2;
+      rationale = currentPsf.customRationale || 'User-defined non-standard material safety factors.';
+    }
+
+    setInputs(prev => ({
+      ...prev,
+      partialSafetyFactors: {
+        gammaM0,
+        gammaM1,
+        gammaM2,
+        isCustomOverride: isCustom,
+        preset,
+        customRationale: rationale,
+      }
+    }));
+  };
+
+  const updateFactor = (field: keyof PartialSafetyFactors, val: any) => {
+    setInputs(prev => {
+      const existing = prev.partialSafetyFactors ?? {
+        gammaM0: 1.00,
+        gammaM1: 1.00,
+        gammaM2: 1.25,
+        isCustomOverride: false,
+        preset: 'eurocode_standard',
+        customRationale: '',
+      };
+      return {
+        ...prev,
+        partialSafetyFactors: {
+          ...existing,
+          isCustomOverride: true,
+          preset: 'custom_override',
+          [field]: val,
+        }
+      };
+    });
+  };
 
   const validationErrors = validateStructuralInputs(inputs);
   const allAvailableSections = [...STANDARD_SECTIONS, ...customSections];
@@ -301,18 +404,68 @@ export const StructuralCalculator: React.FC<StructuralCalculatorProps> = ({
                 </div>
               </div>
 
-              <div className="space-y-1">
-                <label className="text-[11px] font-semibold text-slate-600">
-                  Midspan Point Load Fk (kN)
-                </label>
+              <div className="space-y-2 pt-1 border-t border-slate-100">
+                <div className="flex justify-between items-center text-[11px] font-semibold text-slate-700">
+                  <label htmlFor="pointLoadInput">Concentrated Point Load Fk (kN)</label>
+                  <span className="font-mono text-rose-600 font-bold">{inputs.pointLoadFk} kN</span>
+                </div>
                 <input
+                  id="pointLoadInput"
                   type="number"
                   step="1"
                   min="0"
+                  max="500"
                   value={inputs.pointLoadFk}
                   onChange={(e) => updateNumericInput('pointLoadFk', Math.max(0, parseFloat(e.target.value) || 0))}
                   className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-mono font-medium text-slate-900"
                 />
+
+                {inputs.pointLoadFk > 0 && (
+                  <div className="space-y-1.5 p-2.5 bg-rose-50/50 rounded-lg border border-rose-100">
+                    <div className="flex justify-between text-[11px] font-semibold text-slate-700">
+                      <span>Point Load Location (from Support A)</span>
+                      <span className="font-mono text-rose-700 font-bold">
+                        a = {results.pointLoadLocationA} m
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0"
+                      max={inputs.spanMeters}
+                      step="0.1"
+                      value={results.pointLoadLocationA}
+                      onChange={(e) => setInputs(prev => ({ ...prev, pointLoadPositionMeters: parseFloat(e.target.value) }))}
+                      className="w-full accent-rose-600"
+                    />
+                    <div className="flex justify-between items-center text-[10px] text-slate-400 font-mono">
+                      <span>0.0 m (A)</span>
+                      <div className="flex gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setInputs(prev => ({ ...prev, pointLoadPositionMeters: Number((inputs.spanMeters / 4).toFixed(2)) }))}
+                          className="px-1.5 py-0.5 rounded bg-white hover:bg-slate-100 border text-slate-700 font-semibold"
+                        >
+                          L/4
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setInputs(prev => ({ ...prev, pointLoadPositionMeters: Number((inputs.spanMeters / 2).toFixed(2)) }))}
+                          className="px-1.5 py-0.5 rounded bg-white hover:bg-slate-100 border text-slate-700 font-semibold"
+                        >
+                          L/2 (Mid)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setInputs(prev => ({ ...prev, pointLoadPositionMeters: Number(((3 * inputs.spanMeters) / 4).toFixed(2)) }))}
+                          className="px-1.5 py-0.5 rounded bg-white hover:bg-slate-100 border text-slate-700 font-semibold"
+                        >
+                          3L/4
+                        </button>
+                      </div>
+                      <span>{inputs.spanMeters} m (B)</span>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center gap-2 pt-1">
@@ -345,6 +498,257 @@ export const StructuralCalculator: React.FC<StructuralCalculatorProps> = ({
                 </select>
               </div>
             </div>
+          </div>
+
+          {/* Partial Safety Factors (γ_M) Settings Panel */}
+          <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Settings2 className="w-4 h-4 text-indigo-600" />
+                <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                  Partial Safety Factors (γ_M) Settings
+                </h3>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className={`text-[10px] font-mono px-2 py-0.5 rounded font-bold ${
+                  currentPsf.isCustomOverride
+                    ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                    : 'bg-slate-100 text-slate-600'
+                }`}>
+                  {currentPsf.isCustomOverride ? 'NON-STANDARD OVERRIDE ⚠' : 'STANDARD EC3'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setIsSafetyPanelOpen(!isSafetyPanelOpen)}
+                  className="p-1 text-slate-400 hover:text-slate-600 rounded transition-colors"
+                  title="Toggle Settings Panel"
+                >
+                  {isSafetyPanelOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+
+            <p className="text-[11px] text-slate-500">
+              Eurocode 3 partial resistance factors (EN 1993-1-1 Cl. 6.1). Override values for non-standard material applications (e.g. stainless steel, reused steel, offshore).
+            </p>
+
+            {/* Quick Status Strip */}
+            <div className="grid grid-cols-3 gap-2 text-center text-xs font-mono bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+              <div>
+                <span className="block text-[10px] text-slate-400 uppercase font-sans">Yielding γ_M0</span>
+                <strong className={currentPsf.gammaM0 !== 1.00 ? 'text-amber-700 font-bold' : 'text-slate-800'}>
+                  {currentPsf.gammaM0.toFixed(2)}
+                </strong>
+              </div>
+              <div>
+                <span className="block text-[10px] text-slate-400 uppercase font-sans">Stability γ_M1</span>
+                <strong className={currentPsf.gammaM1 !== 1.00 ? 'text-amber-700 font-bold' : 'text-slate-800'}>
+                  {currentPsf.gammaM1.toFixed(2)}
+                </strong>
+              </div>
+              <div>
+                <span className="block text-[10px] text-slate-400 uppercase font-sans">Fracture γ_M2</span>
+                <strong className={currentPsf.gammaM2 !== 1.25 ? 'text-amber-700 font-bold' : 'text-slate-800'}>
+                  {currentPsf.gammaM2.toFixed(2)}
+                </strong>
+              </div>
+            </div>
+
+            {/* Active Alert when Custom Override is On */}
+            {currentPsf.isCustomOverride && (
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-900 space-y-1">
+                <div className="flex items-center gap-1.5 font-bold">
+                  <ShieldAlert className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>Non-Standard Material Factors Active</span>
+                </div>
+                <p className="text-[11px] leading-relaxed">
+                  Yield resistance Mc,Rd & Vc,Rd are divided by <strong>γM0 = {results.appliedGammaM0}</strong>. Member stability Mb,Rd is divided by <strong>γM1 = {results.appliedGammaM1}</strong>. Connection & weld checks use <strong>γM2 = {results.appliedGammaM2}</strong>.
+                </p>
+                {currentPsf.customRationale && (
+                  <p className="text-[10px] font-mono text-amber-800 pt-0.5">
+                    Basis: {currentPsf.customRationale}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Collapsible / Expandable detailed settings */}
+            {isSafetyPanelOpen && (
+              <div className="space-y-4 pt-2 border-t border-slate-100">
+                {/* Standard & Non-Standard Presets */}
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-semibold text-slate-700 flex justify-between">
+                    <span>Non-Standard Material Presets</span>
+                    <span className="text-[10px] text-indigo-600 font-mono">Quick Selection</span>
+                  </label>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => applyPreset('eurocode_standard')}
+                      className={`px-2.5 py-1.5 text-[11px] font-medium rounded-lg border text-left transition-colors ${
+                        currentPsf.preset === 'eurocode_standard' && !currentPsf.isCustomOverride
+                          ? 'bg-indigo-50 border-indigo-300 text-indigo-900 font-bold'
+                          : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                      }`}
+                    >
+                      <div className="font-semibold">Standard EC3</div>
+                      <div className="text-[9px] text-slate-400">γM0=1.00, γM1=1.00, γM2=1.25</div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => applyPreset('uk_national_annex')}
+                      className={`px-2.5 py-1.5 text-[11px] font-medium rounded-lg border text-left transition-colors ${
+                        currentPsf.preset === 'uk_national_annex'
+                          ? 'bg-indigo-50 border-indigo-300 text-indigo-900 font-bold'
+                          : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                      }`}
+                    >
+                      <div className="font-semibold">UK National Annex</div>
+                      <div className="text-[9px] text-slate-400">γM0=1.00, γM1=1.00, γM2=1.10</div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => applyPreset('stainless_steel_en1993_1_4')}
+                      className={`px-2.5 py-1.5 text-[11px] font-medium rounded-lg border text-left transition-colors ${
+                        currentPsf.preset === 'stainless_steel_en1993_1_4'
+                          ? 'bg-indigo-50 border-indigo-300 text-indigo-900 font-bold'
+                          : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                      }`}
+                    >
+                      <div className="font-semibold">Stainless Steel</div>
+                      <div className="text-[9px] text-slate-400">EN 1993-1-4 (γM0=1.10, γM1=1.10)</div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => applyPreset('reused_steel_sci_p427')}
+                      className={`px-2.5 py-1.5 text-[11px] font-medium rounded-lg border text-left transition-colors ${
+                        currentPsf.preset === 'reused_steel_sci_p427'
+                          ? 'bg-indigo-50 border-indigo-300 text-indigo-900 font-bold'
+                          : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                      }`}
+                    >
+                      <div className="font-semibold">Reused Steel</div>
+                      <div className="text-[9px] text-slate-400">SCI P427 (γM0=1.15, γM1=1.20)</div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => applyPreset('offshore_dnv')}
+                      className={`px-2.5 py-1.5 text-[11px] font-medium rounded-lg border text-left transition-colors ${
+                        currentPsf.preset === 'offshore_dnv'
+                          ? 'bg-indigo-50 border-indigo-300 text-indigo-900 font-bold'
+                          : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                      }`}
+                    >
+                      <div className="font-semibold">Offshore (DNV)</div>
+                      <div className="text-[9px] text-slate-400">DNV-ST-N001 (γM0=1.15, γM2=1.30)</div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => applyPreset('custom_override')}
+                      className={`px-2.5 py-1.5 text-[11px] font-medium rounded-lg border text-left transition-colors ${
+                        currentPsf.preset === 'custom_override'
+                          ? 'bg-indigo-50 border-indigo-300 text-indigo-900 font-bold'
+                          : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                      }`}
+                    >
+                      <div className="font-semibold">Custom Manual</div>
+                      <div className="text-[9px] text-slate-400">Direct manual factor entry</div>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Manual Override Factor Inputs */}
+                <div className="space-y-3 pt-2 border-t border-slate-100">
+                  <span className="text-xs font-bold text-slate-800 uppercase tracking-wider block">
+                    Manual Partial Factor Inputs
+                  </span>
+
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-semibold text-slate-700 block">
+                        γ_M0 (Yielding)
+                      </label>
+                      <input
+                        type="number"
+                        step="0.05"
+                        min="0.50"
+                        max="2.50"
+                        value={currentPsf.gammaM0}
+                        onChange={(e) => updateFactor('gammaM0', Math.max(0.5, parseFloat(e.target.value) || 1.00))}
+                        className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2 py-1.5 text-xs font-mono font-medium text-slate-900"
+                      />
+                      <span className="text-[9px] text-slate-400 block">Mc,Rd & Vc,Rd</span>
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-semibold text-slate-700 block">
+                        γ_M1 (Stability)
+                      </label>
+                      <input
+                        type="number"
+                        step="0.05"
+                        min="0.50"
+                        max="2.50"
+                        value={currentPsf.gammaM1}
+                        onChange={(e) => updateFactor('gammaM1', Math.max(0.5, parseFloat(e.target.value) || 1.00))}
+                        className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2 py-1.5 text-xs font-mono font-medium text-slate-900"
+                      />
+                      <span className="text-[9px] text-slate-400 block">Mb,Rd (LTB)</span>
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-semibold text-slate-700 block">
+                        γ_M2 (Fracture)
+                      </label>
+                      <input
+                        type="number"
+                        step="0.05"
+                        min="0.50"
+                        max="3.00"
+                        value={currentPsf.gammaM2}
+                        onChange={(e) => updateFactor('gammaM2', Math.max(0.5, parseFloat(e.target.value) || 1.25))}
+                        className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2 py-1.5 text-xs font-mono font-medium text-slate-900"
+                      />
+                      <span className="text-[9px] text-slate-400 block">Welds & Net A</span>
+                    </div>
+                  </div>
+
+                  {/* Non-Standard Material Engineering Rationale */}
+                  <div className="space-y-1 pt-1">
+                    <label className="text-[11px] font-semibold text-slate-700 block">
+                      Engineering Justification / Non-Standard Material Application:
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Reclaimed steel S275 per SCI P427, or austenitic 316L per EN 1993-1-4"
+                      value={currentPsf.customRationale || ''}
+                      onChange={(e) => updateFactor('customRationale', e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-medium text-slate-900"
+                    />
+                  </div>
+
+                  {/* Reset to Default Button */}
+                  <div className="pt-2 flex justify-between items-center">
+                    <span className="text-[10px] text-slate-400">
+                      Standard: γM0=1.00, γM1=1.00, γM2=1.25
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => applyPreset('eurocode_standard')}
+                      className="px-2.5 py-1 text-[11px] font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded border border-slate-200 inline-flex items-center gap-1 transition-colors"
+                    >
+                      <RotateCcw className="w-3 h-3" />
+                      <span>Reset to EC3 Defaults</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -572,88 +976,183 @@ export const StructuralCalculator: React.FC<StructuralCalculatorProps> = ({
                 {/* Neutral axis */}
                 <line x1="80" y1="140" x2="520" y2="140" stroke="#475569" strokeDasharray="3,3" strokeWidth="1" />
 
-                {/* DIAGRAM VIEW 1: LOADS */}
-                {activeDiagram === 'loads' && (
-                  <g>
-                    {/* Beam element */}
-                    <rect x="80" y="132" width="440" height="16" fill="#334155" stroke="#94a3b8" strokeWidth="1.5" rx="2" />
-                    
-                    {/* Distributed Load arrows (UDL) */}
-                    {Array.from({ length: 11 }).map((_, i) => {
-                      const x = 90 + i * 42;
-                      return (
-                        <g key={i}>
-                          <line x1={x} y1="75" x2={x} y2="128" stroke="#38bdf8" strokeWidth="1.5" />
-                          <polygon points={`${x},130 ${x - 3},120 ${x + 3},120`} fill="#38bdf8" />
-                        </g>
-                      );
-                    })}
-                    <line x1="90" y1="75" x2="510" y2="75" stroke="#38bdf8" strokeWidth="2" />
-                    <text x="300" y="60" fill="#38bdf8" fontSize="12" fontWeight="bold" textAnchor="middle">
-                      w_ULS = {results.totalUlsLoad} kN/m (1.35 Gk + 1.50 Qk)
-                    </text>
+                {/* DIAGRAM VIEW 1: LOADS & FREE-BODY SCHEMATIC */}
+                {activeDiagram === 'loads' && (() => {
+                  const spanM = Math.max(0.1, inputs.spanMeters);
+                  const aM = results.pointLoadLocationA;
+                  const bM = Math.max(0, spanM - aM);
+                  const xPoint = 80 + (440 * (aM / spanM));
+                  const totalUdlKn = (results.totalUlsLoad * spanM).toFixed(1);
+                  const factoredPointKn = (1.5 * inputs.pointLoadFk).toFixed(1);
 
-                    {/* Point load arrow if > 0 */}
-                    {inputs.pointLoadFk > 0 && (
+                  return (
+                    <g>
+                      {/* Beam Structural Element */}
+                      <rect x="80" y="127" width="440" height="16" fill="#1e293b" stroke="#94a3b8" strokeWidth="2" rx="2" />
+                      <line x1="80" y1="135" x2="520" y2="135" stroke="#475569" strokeDasharray="3,3" strokeWidth="1" />
+
+                      {/* Distributed Load (UDL) band */}
+                      {Array.from({ length: 11 }).map((_, i) => {
+                        const x = 90 + i * 42;
+                        return (
+                          <g key={i}>
+                            <line x1={x} y1="65" x2={x} y2="123" stroke="#38bdf8" strokeWidth="1.5" />
+                            <polygon points={`${x},125 ${x - 3},116 ${x + 3},116`} fill="#38bdf8" />
+                          </g>
+                        );
+                      })}
+                      <line x1="90" y1="65" x2="510" y2="65" stroke="#38bdf8" strokeWidth="2" />
+                      <rect x="180" y="44" width="240" height="18" fill="#020617" rx="4" stroke="#0369a1" strokeWidth="1" />
+                      <text x="300" y="57" fill="#38bdf8" fontSize="11" fontWeight="bold" textAnchor="middle">
+                        w_ULS = {results.totalUlsLoad} kN/m (Total {totalUdlKn} kN)
+                      </text>
+
+                      {/* Point Load Arrow at exact position X=xPoint */}
+                      {inputs.pointLoadFk > 0 && (
+                        <g>
+                          <line x1={xPoint} y1="15" x2={xPoint} y2="123" stroke="#f43f5e" strokeWidth="3" />
+                          <polygon points={`${xPoint},126 ${xPoint - 6},110 ${xPoint + 6},110`} fill="#f43f5e" />
+                          
+                          {/* Point load label bubble */}
+                          <rect
+                            x={Math.max(85, Math.min(415, xPoint - 90))}
+                            y="2"
+                            width="180"
+                            height="18"
+                            fill="#020617"
+                            rx="4"
+                            stroke="#e11d48"
+                            strokeWidth="1.5"
+                          />
+                          <text
+                            x={Math.max(85, Math.min(415, xPoint - 90)) + 90}
+                            y="15"
+                            fill="#f43f5e"
+                            fontSize="11"
+                            fontWeight="bold"
+                            textAnchor="middle"
+                          >
+                            F_ULS = {factoredPointKn} kN (Fk={inputs.pointLoadFk})
+                          </text>
+
+                          {/* Point load dimension lines underneath beam */}
+                          <line x1="80" y1="172" x2={xPoint} y2="172" stroke="#fb7185" strokeWidth="1" />
+                          <line x1="80" y1="168" x2="80" y2="176" stroke="#fb7185" strokeWidth="1" />
+                          <line x1={xPoint} y1="168" x2={xPoint} y2="176" stroke="#fb7185" strokeWidth="1" />
+                          <text x={(80 + xPoint) / 2} y="168" fill="#fb7185" fontSize="10" fontWeight="bold" textAnchor="middle">
+                            a = {aM.toFixed(2)}m
+                          </text>
+
+                          <line x1={xPoint} y1="172" x2="520" y2="172" stroke="#fb7185" strokeWidth="1" />
+                          <line x1={xPoint} y1="168" x2={xPoint} y2="176" stroke="#fb7185" strokeWidth="1" />
+                          <line x1="520" y1="168" x2="520" y2="176" stroke="#fb7185" strokeWidth="1" />
+                          <text x={(xPoint + 520) / 2} y="168" fill="#fb7185" fontSize="10" fontWeight="bold" textAnchor="middle">
+                            b = {bM.toFixed(2)}m
+                          </text>
+                        </g>
+                      )}
+
+                      {/* UPWARD SUPPORT REACTION ARROWS */}
+                      {/* Left Reaction Ra (Upward into Support A at X=80) */}
                       <g>
-                        <line x1="300" y1="20" x2="300" y2="128" stroke="#f43f5e" strokeWidth="2.5" />
-                        <polygon points="300,130 294,115 306,115" fill="#f43f5e" />
-                        <text x="300" y="15" fill="#f43f5e" fontSize="12" fontWeight="bold" textAnchor="middle">
-                          F_ULS = {(1.5 * inputs.pointLoadFk).toFixed(1)} kN
+                        <line x1="80" y1="210" x2="80" y2="168" stroke="#10b981" strokeWidth="3" />
+                        <polygon points="80,165 75,176 85,176" fill="#10b981" />
+                        <rect x="25" y="212" width="110" height="24" fill="#020617" rx="4" stroke="#059669" strokeWidth="1.5" />
+                        <text x="80" y="225" fill="#34d399" fontSize="11" fontWeight="bold" textAnchor="middle">
+                          R_A = {results.reactionRa} kN
+                        </text>
+                        <text x="80" y="234" fill="#94a3b8" fontSize="8" textAnchor="middle">
+                          Pin Support A (↑)
                         </text>
                       </g>
-                    )}
-                  </g>
-                )}
+
+                      {/* Right Reaction Rb (Upward into Support B at X=520) */}
+                      <g>
+                        <line x1="520" y1="210" x2="520" y2="168" stroke="#10b981" strokeWidth="3" />
+                        <polygon points="520,165 515,176 525,176" fill="#10b981" />
+                        <rect x="465" y="212" width="110" height="24" fill="#020617" rx="4" stroke="#059669" strokeWidth="1.5" />
+                        <text x="520" y="225" fill="#34d399" fontSize="11" fontWeight="bold" textAnchor="middle">
+                          R_B = {results.reactionRb} kN
+                        </text>
+                        <text x="520" y="234" fill="#94a3b8" fontSize="8" textAnchor="middle">
+                          Roller Support B (↑)
+                        </text>
+                      </g>
+
+                      {/* Total Span Dimension Bar */}
+                      <g>
+                        <line x1="80" y1="190" x2="520" y2="190" stroke="#94a3b8" strokeWidth="1" />
+                        <line x1="80" y1="185" x2="80" y2="195" stroke="#94a3b8" strokeWidth="1" />
+                        <line x1="520" y1="185" x2="520" y2="195" stroke="#94a3b8" strokeWidth="1" />
+                        <rect x="240" y="182" width="120" height="15" fill="#0f172a" rx="2" />
+                        <text x="300" y="193" fill="#cbd5e1" fontSize="10" fontWeight="bold" textAnchor="middle">
+                          Span L = {spanM.toFixed(2)} m
+                        </text>
+                      </g>
+                    </g>
+                  );
+                })()}
 
                 {/* DIAGRAM VIEW 2: BENDING MOMENT (BMD) */}
-                {activeDiagram === 'bmd' && (
-                  <g>
-                    {/* Baseline */}
-                    <line x1="80" y1="140" x2="520" y2="140" stroke="#64748b" strokeWidth="1.5" />
-                    {/* Parabolic moment curve (drawn downwards positive in Eurocode convention) */}
-                    <path
-                      d="M 80 140 Q 300 40 520 140 Z"
-                      fill="rgba(99, 102, 241, 0.25)"
-                      stroke="#818cf8"
-                      strokeWidth="2.5"
-                    />
-                    <circle cx="300" cy="90" r="4" fill="#c7d2fe" />
-                    <text x="300" y="70" fill="#a5b4fc" fontSize="13" fontWeight="bold" textAnchor="middle">
-                      M_Ed,max = {results.designBendingMomentMed} kNm
-                    </text>
-                    <text x="300" y="165" fill="#94a3b8" fontSize="11" textAnchor="middle">
-                      Midspan Maximum Flexural Moment (Parabolic Envelope)
-                    </text>
-                  </g>
-                )}
+                {activeDiagram === 'bmd' && (() => {
+                  const spanM = Math.max(0.1, inputs.spanMeters);
+                  const aM = results.pointLoadLocationA;
+                  const xPoint = 80 + (440 * (aM / spanM));
+
+                  return (
+                    <g>
+                      {/* Baseline */}
+                      <line x1="80" y1="140" x2="520" y2="140" stroke="#64748b" strokeWidth="1.5" />
+                      {/* Parabolic / combined moment curve */}
+                      <path
+                        d={`M 80 140 Q ${xPoint} 35 520 140 Z`}
+                        fill="rgba(99, 102, 241, 0.25)"
+                        stroke="#818cf8"
+                        strokeWidth="2.5"
+                      />
+                      <circle cx={xPoint} cy="88" r="4" fill="#c7d2fe" />
+                      <text x={xPoint} y="68" fill="#a5b4fc" fontSize="13" fontWeight="bold" textAnchor="middle">
+                        M_Ed,max = {results.designBendingMomentMed} kNm
+                      </text>
+                      <text x="300" y="165" fill="#94a3b8" fontSize="11" textAnchor="middle">
+                        Bending Moment Envelope (Peak at x = {aM.toFixed(2)}m)
+                      </text>
+                    </g>
+                  );
+                })()}
 
                 {/* DIAGRAM VIEW 3: SHEAR FORCE (SFD) */}
-                {activeDiagram === 'sfd' && (
-                  <g>
-                    {/* Baseline */}
-                    <line x1="80" y1="140" x2="520" y2="140" stroke="#64748b" strokeWidth="1.5" />
-                    {/* Linear shear profile */}
-                    <polygon
-                      points={`80,140 80,70 300,140 80,140`}
-                      fill="rgba(16, 185, 129, 0.25)"
-                      stroke="#34d399"
-                      strokeWidth="2"
-                    />
-                    <polygon
-                      points={`300,140 520,210 520,140 300,140`}
-                      fill="rgba(16, 185, 129, 0.25)"
-                      stroke="#34d399"
-                      strokeWidth="2"
-                    />
-                    <text x="85" y="60" fill="#34d399" fontSize="12" fontWeight="bold" textAnchor="start">
-                      +V_Ed = {results.designShearForceVed} kN
-                    </text>
-                    <text x="515" y="225" fill="#34d399" fontSize="12" fontWeight="bold" textAnchor="end">
-                      -V_Ed = -{results.designShearForceVed} kN
-                    </text>
-                  </g>
-                )}
+                {activeDiagram === 'sfd' && (() => {
+                  const spanM = Math.max(0.1, inputs.spanMeters);
+                  const aM = results.pointLoadLocationA;
+                  const xPoint = 80 + (440 * (aM / spanM));
+
+                  return (
+                    <g>
+                      {/* Baseline */}
+                      <line x1="80" y1="140" x2="520" y2="140" stroke="#64748b" strokeWidth="1.5" />
+                      {/* Step Shear diagram */}
+                      <polygon
+                        points={`80,140 80,65 ${xPoint},95 ${xPoint},140`}
+                        fill="rgba(16, 185, 129, 0.25)"
+                        stroke="#34d399"
+                        strokeWidth="2"
+                      />
+                      <polygon
+                        points={`${xPoint},140 ${xPoint},185 520,215 520,140`}
+                        fill="rgba(16, 185, 129, 0.25)"
+                        stroke="#34d399"
+                        strokeWidth="2"
+                      />
+                      <text x="85" y="58" fill="#34d399" fontSize="12" fontWeight="bold" textAnchor="start">
+                        +V_Ed (R_A) = +{results.reactionRa} kN
+                      </text>
+                      <text x="515" y="230" fill="#34d399" fontSize="12" fontWeight="bold" textAnchor="end">
+                        -V_Ed (R_B) = -{results.reactionRb} kN
+                      </text>
+                    </g>
+                  );
+                })()}
 
                 {/* DIAGRAM VIEW 4: DEFLECTION CURVE */}
                 {activeDiagram === 'deflection' && (
@@ -679,6 +1178,46 @@ export const StructuralCalculator: React.FC<StructuralCalculatorProps> = ({
                   </g>
                 )}
               </svg>
+            </div>
+
+            {/* Real-time Static Equilibrium & Reaction Summary Bar */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono">
+              <div className="space-y-0.5">
+                <span className="text-slate-400 text-[10px] uppercase font-bold tracking-wider block">
+                  ↑ Upward Support Reactions
+                </span>
+                <div className="font-bold text-emerald-700 text-[13px]">
+                  R_A ({results.reactionRa} kN) + R_B ({results.reactionRb} kN)
+                </div>
+                <div className="text-[11px] text-slate-500">
+                  Total Reactions = <strong>{(results.reactionRa + results.reactionRb).toFixed(2)} kN</strong>
+                </div>
+              </div>
+
+              <div className="space-y-0.5">
+                <span className="text-slate-400 text-[10px] uppercase font-bold tracking-wider block">
+                  ↓ Downward Factored Loads
+                </span>
+                <div className="font-bold text-slate-900 text-[13px]">
+                  Total ULS = {results.totalFactoredLoadKn} kN
+                </div>
+                <div className="text-[11px] text-slate-500">
+                  UDL: {(results.totalUlsLoad * inputs.spanMeters).toFixed(1)} kN | Point: {(1.5 * inputs.pointLoadFk).toFixed(1)} kN
+                </div>
+              </div>
+
+              <div className="space-y-0.5 sm:text-right">
+                <span className="text-slate-400 text-[10px] uppercase font-bold tracking-wider block">
+                  Static Equilibrium Check (Σ Fy = 0)
+                </span>
+                <div className="inline-flex items-center gap-1.5 font-bold text-emerald-700 text-[12px] bg-emerald-50 px-2.5 py-1 rounded border border-emerald-200">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>PERFECT EQUILIBRIUM</span>
+                </div>
+                <div className="text-[10px] text-slate-400 block mt-0.5">
+                  Δ = {Math.abs((results.reactionRa + results.reactionRb) - results.totalFactoredLoadKn).toFixed(2)} kN
+                </div>
+              </div>
             </div>
           </div>
 

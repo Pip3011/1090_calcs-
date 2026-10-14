@@ -7,6 +7,7 @@ import {
   StructuralResults,
   LiftingInputs,
   LiftingResults,
+  DetailedWeldStressCheck,
   SteelSection
 } from '../types';
 import { STEEL_GRADES, STANDARD_SECTIONS, SHACKLE_CATALOG } from '../data/steelSections';
@@ -66,17 +67,41 @@ export function calculateStructuralBeam(inputs: StructuralInputs, customSections
   // Eurocode SLS combination: 1.00 Gk + 1.00 Qk
   const totalSlsLoad = totalDeadLoad + inputs.liveLoadQk;
 
-  // Design internal actions at ULS
+  // Point load position (distance from left support A)
+  const a = inputs.pointLoadPositionMeters !== undefined && inputs.pointLoadPositionMeters >= 0 && inputs.pointLoadPositionMeters <= span
+    ? inputs.pointLoadPositionMeters
+    : span / 2;
+  const b = span - a;
+
+  // Support Reactions at ULS (EN 1990 Eq. 6.10)
+  // Reaction at Left Support A:
+  const raUdl = (totalUlsLoad * span) / 2;
+  const raPoint = span > 0 ? (factoredPointLoad * b) / span : 0;
+  const reactionRa = raUdl + raPoint; // kN
+
+  // Reaction at Right Support B:
+  const rbUdl = (totalUlsLoad * span) / 2;
+  const rbPoint = span > 0 ? (factoredPointLoad * a) / span : 0;
+  const reactionRb = rbUdl + rbPoint; // kN
+
+  const totalFactoredLoadKn = totalUlsLoad * span + factoredPointLoad;
+
+  // Maximum design shear force Ved = max(Ra, Rb)
+  const designShearForceVed = Math.max(reactionRa, reactionRb);
+
+  // Maximum design bending moment Med at ULS
   const medUdl = (totalUlsLoad * span * span) / 8;
-  const medPoint = (factoredPointLoad * span) / 4;
+  const medPoint = span > 0 ? (factoredPointLoad * a * b) / span : 0;
   const designBendingMomentMed = medUdl + medPoint; // kNm
 
-  const vedUdl = (totalUlsLoad * span) / 2;
-  const vedPoint = factoredPointLoad / 2;
-  const designShearForceVed = vedUdl + vedPoint; // kN
+  // Eurocode EN 1993-1-1 Partial Safety Factors (gamma_M0, gamma_M1, gamma_M2)
+  const psf = inputs.partialSafetyFactors;
+  const gammaM0 = Math.max(0.5, psf?.gammaM0 ?? 1.00);
+  const gammaM1 = Math.max(0.5, psf?.gammaM1 ?? 1.00);
+  const gammaM2 = Math.max(0.5, psf?.gammaM2 ?? 1.25);
+  const isCustomSafetyFactorsActive = !!psf?.isCustomOverride;
 
-  // Eurocode EN 1993-1-1 Cross-section resistance (gamma_M0 = 1.0)
-  const gammaM0 = 1.00;
+  // Cross-section yielding plastic moment resistance: Mc,Rd = (Wpl,y * fy) / gammaM0
   // Wpl,y in cm3 -> Wpl,y * 10^3 mm3 * fy N/mm2 * 10^-6 = Wpl,y * fy * 1e-3 kNm
   const plasticMomentResistanceMcRd = (section.plasticSectionModulusY * fy * 1e-3) / gammaM0;
 
@@ -109,6 +134,46 @@ export function calculateStructuralBeam(inputs: StructuralInputs, customSections
     reducedMomentResistance = plasticMomentResistanceMcRd * (1 - rho * 0.15);
   }
 
+  // Member Buckling Resistance Mb,Rd with gammaM1 (EN 1993-1-1 Cl. 6.3.2 Lateral Torsional Buckling)
+  let bucklingMomentResistanceMbRd: number | undefined = undefined;
+  let bucklingUtilization: number | undefined = undefined;
+  let isBucklingPass: boolean = true;
+
+  if (inputs.lateralRestraint === 'continuous') {
+    bucklingMomentResistanceMbRd = plasticMomentResistanceMcRd;
+    bucklingUtilization = bendingUtilization;
+    isBucklingPass = bendingUtilization <= 1.00;
+  } else {
+    // Unrestrained length L_cr
+    const lCrMeters = inputs.lateralRestraint === 'intermediate_halves' ? span / 2 : span;
+    const lCrMm = lCrMeters * 1000;
+    
+    // Approximate critical elastic moment Mcr for simply supported rolled beam with uniform load
+    // Mcr ≈ (pi^2 * E * Iz / L_cr^2) * sqrt(Iw / Iz + L_cr^2 * G * It / (pi^2 * E * Iz))
+    // We approximate standard reduction factor chi_LT per EN 1993-1-1 Cl. 6.3.2.3:
+    const E = 210000; // N/mm2
+    const izMm4 = (section.secondMomentOfAreaY * 1e4) * 0.12; // approximate weak-axis Iz ≈ 0.12 * Iy
+    const itMm4 = 2 * section.width * Math.pow(section.flangeThickness, 3) / 3;
+    const iwMm6 = (izMm4 * Math.pow(hMm, 2)) / 4;
+    const G = 81000;
+
+    const term1 = (Math.PI * Math.PI * E * izMm4) / Math.pow(lCrMm, 2);
+    const term2 = Math.sqrt((iwMm6 / Math.max(1, izMm4)) + (Math.pow(lCrMm, 2) * G * itMm4) / Math.max(1, Math.PI * Math.PI * E * izMm4));
+    const mcrNmm = term1 * term2;
+    const mcrKnm = mcrNmm * 1e-6;
+
+    const lambdaLt = Math.sqrt(Math.max(0.1, (section.plasticSectionModulusY * fy * 1e-3) / Math.max(0.1, mcrKnm)));
+    // Imperfection factor alpha_LT (Curve a=0.21, b=0.34, c=0.49, d=0.76)
+    const alphaLt = (hMm / bMm) > 1.2 ? 0.34 : 0.49;
+    const phiLt = 0.5 * (1 + alphaLt * (lambdaLt - 0.2) + Math.pow(lambdaLt, 2));
+    const chiLt = Math.min(1.0, 1.0 / (phiLt + Math.sqrt(Math.max(0.01, Math.pow(phiLt, 2) - Math.pow(lambdaLt, 2)))));
+
+    // Mb,Rd = chi_LT * Wpl,y * fy / gammaM1
+    bucklingMomentResistanceMbRd = Number(((chiLt * section.plasticSectionModulusY * fy * 1e-3) / gammaM1).toFixed(2));
+    bucklingUtilization = Number((designBendingMomentMed / Math.max(0.1, bucklingMomentResistanceMbRd)).toFixed(3));
+    isBucklingPass = bucklingUtilization <= 1.00;
+  }
+
   // Deflection at SLS
   // delta = (5 * w_SLS * L^4) / (384 * E * Iy) + (F_SLS * L^3) / (48 * E * Iy)
   // E = 210,000 N/mm2. L in mm = span * 1000. Iy in mm4 = section.secondMomentOfAreaY * 1e4.
@@ -139,6 +204,10 @@ export function calculateStructuralBeam(inputs: StructuralInputs, customSections
     totalSlsLoad: Number(totalSlsLoad.toFixed(2)),
     designBendingMomentMed: Number(designBendingMomentMed.toFixed(2)),
     designShearForceVed: Number(designShearForceVed.toFixed(2)),
+    reactionRa: Number(reactionRa.toFixed(2)),
+    reactionRb: Number(reactionRb.toFixed(2)),
+    pointLoadLocationA: Number(a.toFixed(2)),
+    totalFactoredLoadKn: Number(totalFactoredLoadKn.toFixed(2)),
     yieldStrengthFy: fy,
     plasticMomentResistanceMcRd: Number(plasticMomentResistanceMcRd.toFixed(2)),
     shearResistanceVcRd: Number(shearResistanceVcRd.toFixed(2)),
@@ -152,19 +221,56 @@ export function calculateStructuralBeam(inputs: StructuralInputs, customSections
     isBendingPass,
     isShearPass,
     isDeflectionPass,
-    overallStatus: isBendingPass && isShearPass && isDeflectionPass ? 'PASS' : 'FAIL',
+    appliedGammaM0: gammaM0,
+    appliedGammaM1: gammaM1,
+    appliedGammaM2: gammaM2,
+    isCustomSafetyFactorsActive,
+    bucklingMomentResistanceMbRd,
+    bucklingUtilization,
+    isBucklingPass,
+    overallStatus: isBendingPass && isShearPass && isDeflectionPass && isBucklingPass ? 'PASS' : 'FAIL',
   };
 }
 
-export function calculateSafeLifting(inputs: LiftingInputs): LiftingResults {
+export function calculateSafeLifting(
+  inputs: LiftingInputs,
+  partialFactors?: { gammaM0?: number; gammaM2?: number }
+): LiftingResults {
   const grossStaticWeightKg = inputs.tareWeightKg + inputs.riggingAccessoryWeightKg;
   const grossStaticWeightKn = (grossStaticWeightKg * 9.81) / 1000;
+
+  // Geometry calculation from sling length and pickup point spacing
+  let calculatedSlingAngleDeg = inputs.slingAngleToVerticalDeg;
+  let calculatedHookHeightMeters = 0;
+  const halfSpacing = Math.max(0.1, inputs.pickupPointsSpacingMeters / 2);
+
+  if (inputs.useLengthToDeriveAngle && inputs.slingLengthMeters > 0) {
+    // sin(theta) = halfSpacing / slingLength
+    if (inputs.slingLengthMeters > halfSpacing) {
+      const ratio = Math.min(0.999, halfSpacing / inputs.slingLengthMeters);
+      calculatedSlingAngleDeg = Math.asin(ratio) * (180 / Math.PI);
+      calculatedHookHeightMeters = Math.sqrt(Math.max(0, Math.pow(inputs.slingLengthMeters, 2) - Math.pow(halfSpacing, 2)));
+    } else {
+      calculatedSlingAngleDeg = 65; // Geometry invalid: sling too short for spacing
+      calculatedHookHeightMeters = 0;
+    }
+  } else {
+    calculatedSlingAngleDeg = inputs.slingAngleToVerticalDeg;
+    const thetaR = (calculatedSlingAngleDeg * Math.PI) / 180;
+    calculatedHookHeightMeters = thetaR > 0 ? halfSpacing / Math.tan(thetaR) : inputs.slingLengthMeters;
+  }
+
+  // Adjust DAF for forklift transport if chosen
+  let dynamicFactor = inputs.dynamicAmplificationFactor;
+  if (inputs.riggingMethod === 'forklift_slung' && inputs.fltGroundCondition === 'rough_yard') {
+    dynamicFactor = Math.max(dynamicFactor, 1.30);
+  }
 
   // Factored dynamic lift load (EN 13155)
   // F_lift = W * g * DAF * k_CoG * gamma_lift
   const factoredDynamicLiftLoadKn =
     grossStaticWeightKn *
-    inputs.dynamicAmplificationFactor *
+    dynamicFactor *
     inputs.centerOfGravityFactor *
     inputs.consequenceFactor;
 
@@ -175,7 +281,7 @@ export function calculateSafeLifting(inputs: LiftingInputs): LiftingResults {
   else if (inputs.slingConfiguration === '3-leg') effectiveLegs = 2.5;
   else if (inputs.slingConfiguration === '4-leg') effectiveLegs = 2.0; // Rigid 4-leg rule: 2 diagonally opposite legs carry load
 
-  const thetaRad = (inputs.slingAngleToVerticalDeg * Math.PI) / 180;
+  const thetaRad = (calculatedSlingAngleDeg * Math.PI) / 180;
   const cosTheta = Math.max(0.2, Math.cos(thetaRad));
 
   // Tension per sling leg
@@ -184,6 +290,36 @@ export function calculateSafeLifting(inputs: LiftingInputs): LiftingResults {
 
   // Recommend sling WLL with industry factor
   const recommendedMinimumSlingWllTonnes = Number((slingTensionPerLegTonnes * 1.05).toFixed(2));
+
+  // Hitch factor deration (EN 1492 / EN 13414)
+  let hitchDerationFactor = 1.00;
+  if (inputs.hitchType === 'choker') {
+    hitchDerationFactor = 0.80; // Choker hitch derated by 20%
+  } else if (inputs.hitchType === 'basket') {
+    hitchDerationFactor = Number((2.0 * cosTheta).toFixed(2)); // Basket hitch multiplies capacity by 2*cos(theta)
+  }
+
+  // Effective user sling capacity check
+  const effectiveSlingCapacityTonnes = Number((inputs.userSlingWllTonnes * hitchDerationFactor).toFixed(2));
+  const slingCapacityUtilization = effectiveSlingCapacityTonnes > 0
+    ? Number((slingTensionPerLegTonnes / effectiveSlingCapacityTonnes).toFixed(3))
+    : 999;
+  const isSlingCapacityPass = slingCapacityUtilization <= 1.00;
+
+  // Forklift calculations
+  // Derated capacity based on load center (ISO 22915 standard formula)
+  // Q_derated = Q_rated * (x + C_std) / (x + max(C_std, C_actual)) where x ≈ 450mm
+  const xAxleMm = 450;
+  const cStd = Math.max(100, inputs.forkliftStandardLoadCenterMm);
+  const cAct = Math.max(cStd, inputs.actualLoadCenterMm);
+  const fltDerationRatio = (xAxleMm + cStd) / (xAxleMm + cAct);
+  const forkliftDeratedCapacityTonnes = Number((inputs.forkliftRatedCapacityTonnes * fltDerationRatio).toFixed(2));
+  const forkliftAppliedTotalTonnes = Number((factoredDynamicLiftLoadKn / 9.81).toFixed(2));
+  const forkliftUtilization = forkliftDeratedCapacityTonnes > 0
+    ? Number((forkliftAppliedTotalTonnes / forkliftDeratedCapacityTonnes).toFixed(3))
+    : 999;
+  const isForkliftPass = forkliftUtilization <= 1.00;
+  const isLoadCenterSafe = inputs.actualLoadCenterMm <= cStd * 2.2;
 
   // Pick suitable shackle from certified catalog
   let recommendedShackle = SHACKLE_CATALOG.find(
@@ -204,11 +340,10 @@ export function calculateSafeLifting(inputs: LiftingInputs): LiftingResults {
   const lugGradeInfo = STEEL_GRADES[inputs.padEyeSteelGrade];
   const fyLug = lugGradeInfo.fy;
   const fuLug = lugGradeInfo.fu;
-  const gammaM0 = 1.00;
-  const gammaM2 = 1.25;
+  const gammaM0 = Math.max(0.5, partialFactors?.gammaM0 ?? 1.00);
+  const gammaM2 = Math.max(0.5, partialFactors?.gammaM2 ?? 1.25);
 
   // 1. Shackle Pin Bearing Stress Check (EN 1993-1-8 Cl. 3.13)
-  // sigma_b = F / (d_pin * t_lug)
   const pinContactAreaMm2 = pinDiameter * inputs.lugThicknessMm;
   const pinBearingStressMpa = (appliedTensionPerPadEyeKn * 1000) / pinContactAreaMm2;
   const allowablePinBearingStressMpa = (1.5 * fyLug) / gammaM0;
@@ -216,9 +351,7 @@ export function calculateSafeLifting(inputs: LiftingInputs): LiftingResults {
   const isBearingPass = bearingUtilization <= 1.00;
 
   // 2. Tear-out / Shear Pull-out Resistance (EN 1993-1-8 Cl. 3.13)
-  // e_net = R - dh / 2
   const eNetMm = Math.max(2, inputs.lugHoleRadiusMm - inputs.lugHoleDiameterMm / 2);
-  // Shear capacity along 2 failure planes
   const tearOutResistanceKn =
     (2 * eNetMm * inputs.lugThicknessMm * (fyLug / Math.sqrt(3))) / (gammaM0 * 1000);
   const tearOutUtilization = tearOutResistanceKn > 0 ? appliedTensionPerPadEyeKn / tearOutResistanceKn : 999;
@@ -231,43 +364,131 @@ export function calculateSafeLifting(inputs: LiftingInputs): LiftingResults {
   const netTensionUtilization = netTensionResistanceKn > 0 ? appliedTensionPerPadEyeKn / netTensionResistanceKn : 999;
   const isNetTensionPass = netTensionUtilization <= 1.00;
 
-  // 4. Double Fillet Weld Stress Check (EN 1993-1-8 Cl. 4.5.3)
-  // Two fillet welds of throat a, length Lw
-  const weldThroat = Math.max(2, inputs.lugWeldThroatMm);
+  // 4. Detailed Double Fillet Weld Stress Check & Interaction (EN 1993-1-8 Cl. 4.5.3)
+  const weldThroat = Math.max(1, inputs.lugWeldThroatMm);
   const weldLength = Math.max(10, inputs.lugWeldLengthMm);
-  const totalWeldAreaMm2 = 2 * weldLength * weldThroat;
-  const weldSectionModulusMm3 = (2 * weldThroat * Math.pow(weldLength, 2)) / 6;
+  const lugHeight = Math.max(10, inputs.lugHeightFromBaseMm);
+  const lugThickness = Math.max(4, inputs.lugThicknessMm);
+  
+  // Effective length per run accounting for end craters: Leff = max(10, Lw - 2a) (EN 1993-1-8 Cl. 4.5.1)
+  const effectiveLengthMm = Math.max(10, weldLength - 2 * weldThroat);
+  const totalThroatAreaMm2 = 2 * weldThroat * effectiveLengthMm;
+  const elasticSectionModulusMm3 = (2 * weldThroat * Math.pow(weldLength, 2)) / 6;
+  const elasticSectionModulusOpMm3 = Math.max(100, 2 * (weldThroat * effectiveLengthMm) * (lugThickness / 2));
 
-  // Vertical tension component + horizontal pull component + 5% lateral side-load (EN 13155)
+  // Resolved dynamic forces at base of pad-eye
   const verticalPullKn = appliedTensionPerPadEyeKn * cosTheta;
-  const horizontalPullKn = appliedTensionPerPadEyeKn * Math.sin(thetaRad);
-  const outOfPlaneLateralKn = 0.05 * appliedTensionPerPadEyeKn; // 5% lateral load
+  const horizontalShearKn = appliedTensionPerPadEyeKn * Math.sin(thetaRad);
+  const lateralSideLoadKn = 0.05 * appliedTensionPerPadEyeKn; // 5% accidental lateral load (DNV-ST-N001 / Eurocode)
+  const inPlaneBendingMomentKnM = (horizontalShearKn * lugHeight) / 1000; // kN·m
+  const outOfPlaneBendingMomentKnM = (lateralSideLoadKn * lugHeight) / 1000; // kN·m
 
-  const directTensionStressMpa = (verticalPullKn * 1000) / totalWeldAreaMm2;
-  const bendingMomentKnMm = horizontalPullKn * inputs.lugHeightFromBaseMm;
-  const inPlaneBendingStressMpa = (bendingMomentKnMm * 1000) / weldSectionModulusMm3;
-  const directShearStressMpa = (horizontalPullKn * 1000) / totalWeldAreaMm2;
-  const outOfPlaneShearMpa = (outOfPlaneLateralKn * 1000) / totalWeldAreaMm2;
+  // Stresses on throat plane (MPa)
+  const directTensionStressMpa = (verticalPullKn * 1000) / totalThroatAreaMm2;
+  const inPlaneBendingStressMpa = (inPlaneBendingMomentKnM * 1e6) / elasticSectionModulusMm3;
+  const outOfPlaneBendingStressMpa = (outOfPlaneBendingMomentKnM * 1e6) / elasticSectionModulusOpMm3;
+  const totalTensionStressMpa = directTensionStressMpa + inPlaneBendingStressMpa + outOfPlaneBendingStressMpa;
 
-  // Combined von Mises weld throat stress
-  const sigmaPerp = (directTensionStressMpa + inPlaneBendingStressMpa) / Math.SQRT2;
-  const tauPerp = sigmaPerp;
-  const tauPara = Math.sqrt(Math.pow(directShearStressMpa, 2) + Math.pow(outOfPlaneShearMpa, 2));
+  const longitudinalShearStressMpa = (horizontalShearKn * 1000) / totalThroatAreaMm2;
+  const transverseShearStressMpa = (lateralSideLoadKn * 1000) / totalThroatAreaMm2;
+  const resultantShearStressMpa = Math.sqrt(
+    Math.pow(longitudinalShearStressMpa, 2) + Math.pow(transverseShearStressMpa, 2)
+  );
 
-  const weldStressMpa = Math.sqrt(Math.pow(sigmaPerp, 2) + 3 * (Math.pow(tauPerp, 2) + Math.pow(tauPara, 2)));
-
-  // Beta_w correlation factor
+  // Correlation factor beta_w (EN 1993-1-8 Table 4.1)
   let betaW = 0.85;
   if (inputs.padEyeSteelGrade === 'S235') betaW = 0.80;
   else if (inputs.padEyeSteelGrade === 'S275') betaW = 0.85;
   else if (inputs.padEyeSteelGrade === 'S355') betaW = 0.90;
   else if (inputs.padEyeSteelGrade === 'S460') betaW = 1.00;
 
-  const allowableWeldStressMpa = fuLug / (betaW * gammaM2);
-  const weldUtilization = allowableWeldStressMpa > 0 ? weldStressMpa / allowableWeldStressMpa : 999;
-  const isWeldPass = weldUtilization <= 1.00;
+  // A. Directional Method (EN 1993-1-8 Cl. 4.5.3.2)
+  const sigmaPerpMpa = totalTensionStressMpa / Math.SQRT2;
+  const tauPerpMpa = totalTensionStressMpa / Math.SQRT2;
+  const tauParaMpa = resultantShearStressMpa;
+  const vonMisesStressMpa = Math.sqrt(
+    Math.pow(sigmaPerpMpa, 2) + 3 * (Math.pow(tauPerpMpa, 2) + Math.pow(tauParaMpa, 2))
+  );
+  const designWeldStrengthFwRdMpa = fuLug / (betaW * gammaM2);
+  const directionalUtilization = designWeldStrengthFwRdMpa > 0 ? vonMisesStressMpa / designWeldStrengthFwRdMpa : 999;
+  
+  const normalStressLimitMpa = (0.9 * fuLug) / gammaM2;
+  const normalStressUtilization = normalStressLimitMpa > 0 ? sigmaPerpMpa / normalStressLimitMpa : 999;
+  const isDirectionalPass = directionalUtilization <= 1.00 && normalStressUtilization <= 1.00;
 
-  const overallLiftingStatus = isBearingPass && isTearOutPass && isNetTensionPass && isWeldPass ? 'PASS' : 'FAIL';
+  // B. Simplified Method (EN 1993-1-8 Cl. 4.5.3.3)
+  const designShearStrengthFvwdMpa = (fuLug / Math.sqrt(3)) / (betaW * gammaM2);
+  const simplifiedResultantStressMpa = Math.sqrt(
+    Math.pow(totalTensionStressMpa, 2) + Math.pow(resultantShearStressMpa, 2)
+  );
+  const simplifiedUtilization = designShearStrengthFvwdMpa > 0
+    ? simplifiedResultantStressMpa / designShearStrengthFvwdMpa
+    : 999;
+  const isSimplifiedPass = simplifiedUtilization <= 1.00;
+
+  // C. Combined Shear/Tension Interaction Check
+  const allowableTension = designWeldStrengthFwRdMpa / Math.SQRT2;
+  const interactionIndex =
+    Math.pow(totalTensionStressMpa / Math.max(1, allowableTension), 2) +
+    Math.pow(resultantShearStressMpa / Math.max(1, designShearStrengthFvwdMpa), 2);
+
+  const governingUtilization = Math.max(directionalUtilization, normalStressUtilization, simplifiedUtilization);
+  const isWeldPass = governingUtilization <= 1.00;
+
+  // Recommended minimum throat size to satisfy 100% capacity
+  const recommendedMinimumThroatMm = Math.max(
+    3.0,
+    Number((weldThroat * Math.sqrt(governingUtilization)).toFixed(1))
+  );
+
+  const detailedWeldCheck: DetailedWeldStressCheck = {
+    weldLengthMm: weldLength,
+    weldThroatMm: weldThroat,
+    effectiveLengthMm: Number(effectiveLengthMm.toFixed(1)),
+    totalThroatAreaMm2: Number(totalThroatAreaMm2.toFixed(1)),
+    elasticSectionModulusMm3: Number(elasticSectionModulusMm3.toFixed(1)),
+    verticalPullKn: Number(verticalPullKn.toFixed(2)),
+    horizontalShearKn: Number(horizontalShearKn.toFixed(2)),
+    lateralSideLoadKn: Number(lateralSideLoadKn.toFixed(2)),
+    inPlaneBendingMomentKnM: Number(inPlaneBendingMomentKnM.toFixed(3)),
+    outOfPlaneBendingMomentKnM: Number(outOfPlaneBendingMomentKnM.toFixed(3)),
+    directTensionStressMpa: Number(directTensionStressMpa.toFixed(1)),
+    inPlaneBendingStressMpa: Number(inPlaneBendingStressMpa.toFixed(1)),
+    outOfPlaneBendingStressMpa: Number(outOfPlaneBendingStressMpa.toFixed(1)),
+    totalTensionStressMpa: Number(totalTensionStressMpa.toFixed(1)),
+    longitudinalShearStressMpa: Number(longitudinalShearStressMpa.toFixed(1)),
+    transverseShearStressMpa: Number(transverseShearStressMpa.toFixed(1)),
+    resultantShearStressMpa: Number(resultantShearStressMpa.toFixed(1)),
+    sigmaPerpMpa: Number(sigmaPerpMpa.toFixed(1)),
+    tauPerpMpa: Number(tauPerpMpa.toFixed(1)),
+    tauParaMpa: Number(tauParaMpa.toFixed(1)),
+    vonMisesStressMpa: Number(vonMisesStressMpa.toFixed(1)),
+    designWeldStrengthFwRdMpa: Number(designWeldStrengthFwRdMpa.toFixed(1)),
+    directionalUtilization: Number(directionalUtilization.toFixed(3)),
+    normalStressLimitMpa: Number(normalStressLimitMpa.toFixed(1)),
+    normalStressUtilization: Number(normalStressUtilization.toFixed(3)),
+    isDirectionalPass,
+    designShearStrengthFvwdMpa: Number(designShearStrengthFvwdMpa.toFixed(1)),
+    simplifiedResultantStressMpa: Number(simplifiedResultantStressMpa.toFixed(1)),
+    simplifiedUtilization: Number(simplifiedUtilization.toFixed(3)),
+    isSimplifiedPass,
+    interactionIndex: Number(interactionIndex.toFixed(3)),
+    governingUtilization: Number(governingUtilization.toFixed(3)),
+    isWeldPass,
+    correlationFactorBetaW: betaW,
+    recommendedMinimumThroatMm,
+  };
+
+  // Determine Overall Status based on active rigging method
+  let overallLiftingStatus: 'PASS' | 'FAIL' = 'PASS';
+  if (inputs.riggingMethod === 'crane_slings_only') {
+    overallLiftingStatus = isSlingCapacityPass ? 'PASS' : 'FAIL';
+  } else if (inputs.riggingMethod === 'forklift_slung') {
+    overallLiftingStatus = isForkliftPass && isSlingCapacityPass ? 'PASS' : 'FAIL';
+  } else {
+    // crane_padeyes
+    overallLiftingStatus = isBearingPass && isTearOutPass && isNetTensionPass && isWeldPass ? 'PASS' : 'FAIL';
+  }
 
   return {
     grossStaticWeightKn: Number(grossStaticWeightKn.toFixed(2)),
@@ -277,6 +498,17 @@ export function calculateSafeLifting(inputs: LiftingInputs): LiftingResults {
     slingTensionPerLegTonnes: Number(slingTensionPerLegTonnes.toFixed(2)),
     recommendedMinimumSlingWllTonnes,
     recommendedShackle,
+    calculatedSlingAngleDeg: Number(calculatedSlingAngleDeg.toFixed(1)),
+    calculatedHookHeightMeters: Number(calculatedHookHeightMeters.toFixed(2)),
+    hitchDerationFactor,
+    effectiveSlingCapacityTonnes,
+    slingCapacityUtilization,
+    isSlingCapacityPass,
+    forkliftDeratedCapacityTonnes,
+    forkliftAppliedTotalTonnes,
+    forkliftUtilization,
+    isForkliftPass,
+    isLoadCenterSafe,
     appliedTensionPerPadEyeKn: Number(appliedTensionPerPadEyeKn.toFixed(2)),
     pinBearingStressMpa: Number(pinBearingStressMpa.toFixed(1)),
     allowablePinBearingStressMpa: Number(allowablePinBearingStressMpa.toFixed(1)),
@@ -288,10 +520,11 @@ export function calculateSafeLifting(inputs: LiftingInputs): LiftingResults {
     netTensionResistanceKn: Number(netTensionResistanceKn.toFixed(2)),
     netTensionUtilization: Number(netTensionUtilization.toFixed(3)),
     isNetTensionPass,
-    weldStressMpa: Number(weldStressMpa.toFixed(1)),
-    allowableWeldStressMpa: Number(allowableWeldStressMpa.toFixed(1)),
-    weldUtilization: Number(weldUtilization.toFixed(3)),
-    isWeldPass,
+    weldStressMpa: detailedWeldCheck.vonMisesStressMpa,
+    allowableWeldStressMpa: detailedWeldCheck.designWeldStrengthFwRdMpa,
+    weldUtilization: detailedWeldCheck.governingUtilization,
+    isWeldPass: detailedWeldCheck.isWeldPass,
+    detailedWeldCheck,
     overallLiftingStatus,
   };
 }

@@ -79,5 +79,5 @@ export function useOnlineStatus() {
     };
   }, []);
 
-  return isOnline;
+  return import.meta.env.MODE !== 'standalone' && isOnline;
 }

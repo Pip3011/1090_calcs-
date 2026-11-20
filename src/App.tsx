@@ -348,10 +348,10 @@ export default function App() {
             type="button"
             onClick={() => setIsDownloadModalOpen(true)}
             className="px-3.5 py-2 text-xs font-bold text-white bg-indigo-950 hover:bg-indigo-900 border border-indigo-800 rounded-lg transition-colors whitespace-nowrap shrink-0 inline-flex items-center gap-1.5 shadow-xs"
-            title="Open on Any PC · Install as Desktop Application"
+            title={import.meta.env.MODE === 'standalone' ? 'Export project files' : 'Install the web app or export project files'}
           >
             <Laptop className="w-3.5 h-3.5 text-indigo-400" />
-            <span>Open on Any PC</span>
+            <span>{import.meta.env.MODE === 'standalone' ? 'Export Project' : 'Open on Any PC'}</span>
           </button>
           <button
             type="button"

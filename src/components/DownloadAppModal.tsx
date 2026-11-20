@@ -39,12 +39,12 @@ export const DownloadAppModal: React.FC<DownloadAppModalProps> = ({
 }) => {
   const { isInstallable, isInstalled, isIOS, install } = usePWAInstall();
   const isOnline = useOnlineStatus();
+  const isStandaloneBuild = import.meta.env.MODE === 'standalone';
   const [downloadSuccess, setDownloadSuccess] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
-  // Handle Download Standalone Offline HTML File
-  const handleDownloadStandaloneHtml = () => {
+  const handleDownloadReport = () => {
     const htmlContent = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -116,7 +116,7 @@ export const DownloadAppModal: React.FC<DownloadAppModalProps> = ({
     a.download = `EuroStruct_1090_Offline_${metadata.projectNumber || 'Dossier'}.html`;
     a.click();
     URL.revokeObjectURL(url);
-    setDownloadSuccess('Offline standalone HTML report downloaded!');
+    setDownloadSuccess('HTML report downloaded.');
     setTimeout(() => setDownloadSuccess(null), 3000);
   };
 
@@ -152,13 +152,15 @@ export const DownloadAppModal: React.FC<DownloadAppModalProps> = ({
           <div>
             <div className="flex items-center gap-2 text-xs font-semibold text-indigo-700 uppercase tracking-wider">
               <Download className="w-4 h-4 text-indigo-600" />
-              <span>Downloadable Interface & Offline Access</span>
+              <span>EuroStruct 1090</span>
             </div>
             <h2 className="text-xl font-bold text-slate-900 mt-1">
-              Download EuroStruct 1090 Application
+              {isStandaloneBuild ? 'Export Project' : 'Install App or Export Project'}
             </h2>
             <p className="text-xs text-slate-500 mt-0.5">
-              Install directly to your desktop/mobile or download standalone offline packages.
+              {isStandaloneBuild
+                ? 'Save a printable report or a copy of your project data.'
+                : 'Install the web app, save a printable report or download your project data.'}
             </p>
           </div>
           <button
@@ -178,8 +180,7 @@ export const DownloadAppModal: React.FC<DownloadAppModalProps> = ({
             </div>
           )}
 
-          {/* Option 1: Native App Install (PWA) */}
-          <div className="p-5 rounded-xl border border-indigo-100 bg-indigo-50/50 space-y-3">
+          <div hidden={isStandaloneBuild} className="p-5 rounded-xl border border-indigo-100 bg-indigo-50/50 space-y-3">
             <div className="flex items-start justify-between gap-4">
               <div className="flex items-center gap-3">
                 <div className="p-2.5 bg-indigo-900 text-white rounded-xl shadow-xs">
@@ -187,7 +188,7 @@ export const DownloadAppModal: React.FC<DownloadAppModalProps> = ({
                 </div>
                 <div>
                   <h3 className="text-sm font-bold text-slate-900">
-                    Option 1: Install as Desktop / Mobile App (PWA)
+                    Install as a Desktop or Mobile App
                   </h3>
                   <p className="text-xs text-slate-600 mt-0.5">
                     Installs EuroStruct directly to your computer taskbar or phone home screen.
@@ -246,7 +247,6 @@ export const DownloadAppModal: React.FC<DownloadAppModalProps> = ({
             </div>
           </div>
 
-          {/* Option 2: Download Standalone Offline App (.html bundle) */}
           <div className="p-5 rounded-xl border border-slate-200 bg-white space-y-3 hover:border-slate-300 transition-colors">
             <div className="flex items-start justify-between gap-4">
               <div className="flex items-center gap-3">
@@ -255,10 +255,10 @@ export const DownloadAppModal: React.FC<DownloadAppModalProps> = ({
                 </div>
                 <div>
                   <h3 className="text-sm font-bold text-slate-900">
-                    Option 2: Download Portable Offline App (.html)
+                    Printable Report (.html)
                   </h3>
                   <p className="text-xs text-slate-600 mt-0.5">
-                    Single-file offline report & calculations app you can copy to a USB stick, email to clients, or open anywhere without server/internet.
+                    Saves the current structural and lifting results with project and sign-off details.
                   </p>
                 </div>
               </div>
@@ -266,15 +266,14 @@ export const DownloadAppModal: React.FC<DownloadAppModalProps> = ({
 
             <button
               type="button"
-              onClick={handleDownloadStandaloneHtml}
+              onClick={handleDownloadReport}
               className="w-full py-2.5 px-4 text-xs font-bold text-slate-800 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors inline-flex items-center justify-center gap-2"
             >
               <Download className="w-4 h-4" />
-              <span>Download Standalone Offline HTML File</span>
+              <span>Download HTML Report</span>
             </button>
           </div>
 
-          {/* Option 3: Download Complete Project JSON Data */}
           <div className="p-5 rounded-xl border border-slate-200 bg-white space-y-3 hover:border-slate-300 transition-colors">
             <div className="flex items-start justify-between gap-4">
               <div className="flex items-center gap-3">
@@ -283,7 +282,7 @@ export const DownloadAppModal: React.FC<DownloadAppModalProps> = ({
                 </div>
                 <div>
                   <h3 className="text-sm font-bold text-slate-900">
-                    Option 3: Download Project Database (.json)
+                    Project Data (.json)
                   </h3>
                   <p className="text-xs text-slate-600 mt-0.5">
                     Exports full structured calculation records, custom beam definitions, and digital signatures for backup.
